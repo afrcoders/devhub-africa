@@ -1,0 +1,246 @@
+<?php
+
+namespace App\Services\Kortextools;
+
+use Illuminate\Support\Str;
+use App\Services\Kortextools\Handlers\ToolHandlerFactory;
+
+class ToolService
+{
+    /**
+     * Get all tools configuration
+     */
+    public function getAllTools()
+    {
+        return config('kortextools.tools');
+    }
+
+    /**
+     * Get flat list of all tools
+     */
+    public function getFlatToolsList()
+    {
+        static $tools = null;
+
+        if ($tools === null) {
+            $config = config('kortextools.tools');
+            $tools = $this->flattenToolList($config);
+        }
+
+        return $tools;
+    }
+
+    /**
+     * Find tool by slug
+     */
+    public function findToolBySlug($slug)
+    {
+        return collect($this->getFlatToolsList())
+            ->firstWhere('slug', $slug);
+    }
+
+    /**
+     * Get category information
+     */
+    public function getCategoryInfo($categorySlug)
+    {
+        $categoryName = $this->findCategoryName($categorySlug);
+
+        if (!$categoryName) {
+            return null;
+        }
+
+        $tools = config('kortextools.tools')[$categoryName] ?? [];
+
+        return [
+            'slug' => $categorySlug,
+            'category' => $categoryName,
+            'tools' => $tools,
+            'count' => count($tools),
+        ];
+    }
+
+    /**
+     * Find category name by slug
+     */
+    protected function findCategoryName($categorySlug)
+    {
+        $tools = config('kortextools.tools');
+
+        foreach (array_keys($tools) as $categoryName) {
+            if ($this->matchesSlug($categoryName, $categorySlug)) {
+                return $categoryName;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Check if string matches slug
+     */
+    protected function matchesSlug($text, $slug)
+    {
+        return Str::slug($text) === $slug;
+    }
+
+    /**
+     * Get related tools from same category
+     */
+    public function getRelatedTools($categoryName, $toolName, $max = 3)
+    {
+        $tools = config('kortextools.tools')[$categoryName] ?? [];
+
+        // Filter out the current tool
+        $filteredTools = array_filter($tools, function ($tool) use ($toolName) {
+            return $tool['name'] !== $toolName;
+        });
+
+        // If we have fewer tools than requested, return what we have
+        if (count($filteredTools) <= $max) {
+            return array_values($filteredTools);
+        }
+
+        // Get random tools
+        $randomKeys = array_rand($filteredTools, $max);
+
+        if ($max === 1) {
+            return [$filteredTools[$randomKeys]];
+        }
+
+        $result = [];
+        foreach ($randomKeys as $key) {
+            $result[] = $filteredTools[$key];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Search tools by query
+     */
+    public function searchTools($query)
+    {
+        $allTools = $this->getFlatToolsList();
+        $query = Str::lower($query);
+
+        return collect($allTools)
+            ->filter(function ($tool) use ($query) {
+                return Str::contains(Str::lower($tool['name']), $query) ||
+                    Str::contains(Str::lower($tool['description']), $query) ||
+                    Str::contains(Str::lower($tool['slug']), $query);
+            })
+            ->values()
+            ->toArray();
+    }
+
+    /**
+     * Get tools by category
+     */
+    public function getToolsByCategory($categorySlug, $limit = 12)
+    {
+        $data = $this->getCategoryInfo($categorySlug);
+
+        if (!$data) {
+            return [];
+        }
+
+        return array_slice($data['tools'], 0, $limit);
+    }
+
+    /**
+     * Get all categories
+     */
+    public function getCategories()
+    {
+        return collect(config('kortextools.tools'))
+            ->map(function ($tools, $name) {
+                return [
+                    'name' => $name,
+                    'slug' => Str::slug($name),
+                    'icon' => $tools[0]['icon'] ?? 'fas fa-wrench',
+                    'count' => count($tools),
+                ];
+            })
+            ->sortBy('name')
+            ->values()
+            ->toArray();
+    }
+
+    /**
+     * Flatten tool list
+     */
+    protected function flattenToolList(array $groupedTools)
+    {
+        $flatList = [];
+
+        foreach ($groupedTools as $group => $tools) {
+            foreach ($tools as $tool) {
+                if (is_array($tool)) {
+                    $tool['category'] = $group;
+                    $flatList[] = $tool;
+                }
+            }
+        }
+
+        return $flatList;
+    }
+
+    /**
+     * Handle tool submission
+     *
+     * Dispatches to tool-specific handlers based on slug
+     */
+    public function handleTool($slug, $tool, $request)
+    {
+        // Get handler for this tool
+        $handler = ToolHandlerFactory::getHandler($slug);
+
+        if (!$handler) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Tool ' . $slug . ' is not yet implemented',
+            ], 501);
+        }
+
+        // Execute handler
+        return $handler->handle($request);
+    }
+
+    /**
+     * Get popular tools
+     */
+    public function getPopularTools($limit = 6)
+    {
+        return collect($this->getFlatToolsList())
+            ->sortByDesc('popularity')
+            ->take($limit)
+            ->values()
+            ->toArray();
+    }
+
+    /**
+     * Get recently added tools
+     */
+    public function getRecentTools($limit = 6)
+    {
+        return collect($this->getFlatToolsList())
+            ->sortByDesc('created_at')
+            ->take($limit)
+            ->values()
+            ->toArray();
+    }
+
+    /**
+     * Get top-rated tools
+     */
+    public function getTopRatedTools($limit = 6)
+    {
+        return collect($this->getFlatToolsList())
+            ->sortByDesc('rating')
+            ->take($limit)
+            ->values()
+            ->toArray();
+    }
+}
+
