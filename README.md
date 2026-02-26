@@ -48,7 +48,7 @@ DevHub Africa is a comprehensive developer community platform built with Laravel
 
 ```bash
 # Clone the repository
-git clone https://github.com/dhtml/devhub-africa.git
+git clone https://github.com/afrcoders/devhub-africa.git
 cd devhub-africa
 
 # Install with Make
